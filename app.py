@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import talib
 import requests
 import time
 from datetime import datetime, date
@@ -70,40 +69,76 @@ def enviar_telegram(mensagem):
         return False
 
 # ==========================================================
+# 🧠 FUNÇÕES DOS INDICADORES (PURO PANDAS — SEM BIBLIOTECAS EXTRAS)
+# ==========================================================
+def calcular_ema(serie, periodo):
+    return serie.ewm(span=periodo, adjust=False).mean()
+
+def calcular_rsi(serie, periodo=9):
+    delta = serie.diff()
+    ganho = delta.where(delta > 0, 0)
+    perda = -delta.where(delta < 0, 0)
+    media_g = ganho.rolling(window=periodo).mean()
+    media_p = perda.rolling(window=periodo).mean()
+    rs = media_g / media_p
+    return 100 - (100 / (1 + rs))
+
+def detectar_martelo(df):
+    corpo = abs(df['close'] - df['open'])
+    sombra_inf = np.minimum(df['open'], df['close']) - df['low']
+    sombra_sup = df['high'] - np.maximum(df['open'], df['close'])
+    return (sombra_inf > 2 * corpo) & (sombra_sup < corpo * 0.5)
+
+def detectar_engolfo_alta(df):
+    return (df['close'] > df['open'].shift(1)) & (df['open'] < df['close'].shift(1)) & (df['close'] > df['high'].shift(1))
+
+def detectar_engolfo_baixa(df):
+    return (df['close'] < df['open'].shift(1)) & (df['open'] > df['close'].shift(1)) & (df['close'] < df['low'].shift(1))
+
+# ==========================================================
 # 🧠 ESTRATÉGIA — 3 CONFIRMAÇÕES
 # ==========================================================
 def verificar_sinal(df):
     df = df.copy()
-    df['ema21'] = talib.EMA(df['close'], 21)
-    df['ema50'] = talib.EMA(df['close'], 50)
-    df['rsi'] = talib.RSI(df['close'], 9)
+    
+    # 1. Tendência — EMA 21 e 50
+    df['ema21'] = calcular_ema(df['close'], 21)
+    df['ema50'] = calcular_ema(df['close'], 50)
+    
+    # 2. RSI
+    df['rsi'] = calcular_rsi(df['close'], 9)
+    
+    # 3. Volume
     df['vol_ma20'] = df['volume'].rolling(20).mean()
-
-    df['martelo'] = talib.CDLHAMMER(df['open'], df['high'], df['low'], df['close'])
-    df['engolfo'] = talib.CDLENGULFING(df['open'], df['high'], df['low'], df['close'])
-    df['estrela_m'] = talib.CDLMORNINGSTAR(df['open'], df['high'], df['low'], df['close'])
-    df['estrela_t'] = talib.CDLEVENINGSTAR(df['open'], df['high'], df['low'], df['close'])
-
+    
+    # 4. Padrões de vela
+    df['martelo'] = detectar_martelo(df)
+    df['engolfo_alta'] = detectar_engolfo_alta(df)
+    df['engolfo_baixa'] = detectar_engolfo_baixa(df)
+    
+    # 5. Suporte/Resistência
     df['suporte'] = df['low'].rolling(3).min()
     df['resistencia'] = df['high'].rolling(3).max()
 
     ult = df.iloc[-1]
 
+    # 🟢 Sinal COMPRA
     sinal_compra = (
         ult['ema21'] > ult['ema50'] and
         ult['close'] > ult['ema21'] and
         ult['rsi'] < 30 and
         ult['volume'] > ult['vol_ma20'] and
-        (ult['martelo'] > 0 or ult['engolfo'] == 100 or ult['estrela_m'] > 0) and
+        (ult['martelo'] or ult['engolfo_alta']) and
         ult['low'] <= ult['suporte'] * 1.001
     )
 
+    # 🔴 Sinal VENDA
     sinal_venda = (
         ult['ema21'] < ult['ema50'] and
         ult['close'] < ult['ema21'] and
         ult['rsi'] > 70 and
         ult['volume'] > ult['vol_ma20'] and
-        (ult['martelo'] < 0 or ult['engolfo'] == -100 or ult['estrela_t'] > 0) and
+        (ult['martelo'] or ult['engolfo_baixa']) and
         ult['high'] >= ult['resistencia'] * 0.999
     )
 
@@ -138,7 +173,7 @@ if iniciar:
     st.session_state.operacoes_dia = 0
     st.session_state.operacao_ativa = None
     enviar_telegram("🤖 *Robô INICIADO!* Aguardando sinais...")
-    st.success("✅ Robô INICIADO! (Modo simulação — conecte MT5 quando pronto)")
+    st.success("✅ Robô INICIADO! (Aguardando conexão MT5)")
 
 if parar:
     st.session_state.rodando = False
@@ -149,7 +184,7 @@ if parar:
 # 🔄 PAINEL DE MONITORAMENTO
 # ==========================================================
 if st.session_state.rodando:
-    status_area.success("🟢 RODANDO — Monitorando mercado")
+    status_area.success("🟢 RODANDO — Sistema pronto!")
     hoje = date.today()
     if hoje != st.session_state.ultimo_dia:
         st.session_state.operacoes_dia = 0
@@ -166,7 +201,7 @@ if st.session_state.rodando:
 • Posição: {st.session_state.operacao_ativa or 'Nenhuma'}
         """)
         st.markdown("---")
-        st.success("✅ Estratégia carregada! Conecte o MT5 para operar ao vivo.")
-        st.info("💡 Quando tiver o MT5 funcionando, a parte de conexão e ordens será ativada automaticamente.")
+        st.success("✅ Estratégia carregada com sucesso!")
+        st.info("💡 Conecte o MT5 para receber dados e operar.")
 else:
     status_area.info("🔴 PARADO — Configure e clique em INICIAR")
