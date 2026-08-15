@@ -1,6 +1,5 @@
-
 streamlit
 pandas
 numpy
-TA-Lib-bin
+pandas-ta
 requests
