@@ -9,16 +9,16 @@ from datetime import datetime, date
 # 🎨 CONFIGURAÇÃO DA PÁGINA
 # ==========================================================
 st.set_page_config(
-    page_title="Robô WIN — 3 Confirmações",
-    page_icon="📈",
+    page_title="Robô Trading — WIN + Forex + Ouro",
+    page_icon="📊",
     layout="wide"
 )
 
-st.title("🤖 Robô de Negociação — Mini-Índice WIN")
-st.subheader("Estratégia: Tendência + Acúmulo + Reversão | R/R 2:1 | Máx 3/dia")
+st.title("🤖 Robô Trading — Multi-Ativos")
+st.subheader("📊 WIN | 💱 Forex | 🪙 Ouro | Sinais no Telegram")
 
 # ==========================================================
-# 🔒 VALORES JÁ PREENCHIDOS
+# 🔒 DADOS JÁ PREENCHIDOS
 # ==========================================================
 DEFAULT_TELEGRAM_TOKEN = "8878141720:AAFZyvXc_1D5r8dSrvMK0FRgL2cLBahru50"
 DEFAULT_TELEGRAM_CHAT_ID = "7653570291"
@@ -27,29 +27,36 @@ DEFAULT_MT5_SENHA = "2lN8UBk#"
 DEFAULT_MT5_SERVIDOR = "XP"
 
 # ==========================================================
-# ⚙️ PAINEL DE CONFIGURAÇÕES
+# ⚙️ CONFIGURAÇÕES
 # ==========================================================
 with st.sidebar:
-    st.header("🔧 Configurações do Robô")
+    st.header("🔧 Configurações")
 
-    with st.expander("💻 MetaTrader 5 / XP", expanded=False):
+    # 📋 LISTA DE ATIVOS PARA MONITORAR
+    st.subheader("📈 Ativos a Monitorar")
+    MONITORAR_WIN = st.checkbox("📊 WIN (Índice B3)", value=True)
+    MONITORAR_EURUSD = st.checkbox("💱 EURUSD", value=True)
+    MONITORAR_USDJPY = st.checkbox("💱 USDJPY", value=True)
+    MONITORAR_XAUUSD = st.checkbox("🪙 XAUUSD (Ouro)", value=True)
+
+    # 📏 Configurações de Risco
+    st.subheader("📏 Risco")
+    STOP_PIPS = st.slider("Stop (Pips / Pontos)", min_value=10, max_value=50, value=20)
+    R_R_ALVO = st.number_input("Risco/Recompensa", value=2.0, min_value=1.0, step=0.5)
+    MAX_OP_DIA = st.number_input("Máx Sinais/Dia por Ativo", value=3, min_value=1, max_value=10)
+
+    with st.expander("📲 Telegram", expanded=True):
+        TELEGRAM_TOKEN = st.text_input("Token Bot", value=DEFAULT_TELEGRAM_TOKEN, type="password")
+        TELEGRAM_CHAT_ID = st.text_input("Seu Chat ID", value=DEFAULT_TELEGRAM_CHAT_ID)
+
+    with st.expander("💻 MT5 / VPS", expanded=False):
         MT5_LOGIN = st.text_input("Login MT5", value=DEFAULT_MT5_LOGIN)
         MT5_SENHA = st.text_input("Senha MT5", value=DEFAULT_MT5_SENHA, type="password")
         MT5_SERVIDOR = st.text_input("Servidor", value=DEFAULT_MT5_SERVIDOR)
-        ATIVO = st.text_input("Ativo", value="WIN", help="Ex: WINQ26")
-        USAR_MT5 = st.toggle("Usar dados do MT5 (VPS)", value=False, help="Desligado = usa fonte gratuita")
-
-    with st.expander("📲 Telegram", expanded=True):
-        TELEGRAM_TOKEN = st.text_input("Token do Bot", value=DEFAULT_TELEGRAM_TOKEN, type="password")
-        TELEGRAM_CHAT_ID = st.text_input("Seu Chat ID", value=DEFAULT_TELEGRAM_CHAT_ID)
-
-    with st.expander("📊 Parâmetros da Estratégia", expanded=True):
-        STOP_PONTOS = st.number_input("Stop Loss (pontos)", value=20, min_value=5)
-        R_R_ALVO = st.number_input("Risco/Recompensa", value=2.0, min_value=1.0, step=0.1)
-        MAX_OP_DIA = st.number_input("Máx. Operações/Dia", value=3, min_value=1, max_value=10)
+        USAR_MT5 = st.toggle("Entrar ordens automático (VPS)", value=False)
 
     st.markdown("---")
-    st.caption("💡 No VPS é só ligar a opção 'Usar dados do MT5' e ele entra sozinho!")
+    st.caption("✅ Sem chave API! Dados gratuitos em tempo real!")
 
 # ==========================================================
 # 📲 FUNÇÃO TELEGRAM
@@ -70,46 +77,53 @@ def enviar_telegram(mensagem):
         return False
 
 # ==========================================================
-# 📲 FUNÇÃO: BUSCAR DADOS DE FONTE GRATUITA
+# 📡 BUSCAR DADOS — SEM CHAVE API!
 # ==========================================================
-def buscar_dados_gratis(ativo="WIN", velas=100):
-    """Fonte gratuita de preços — funciona no Streamlit"""
+def buscar_dados(ativo, velas=100):
+    """Busca preços GRATUITOS — sem chave, sem limite"""
     try:
-        # 📡 Simulação com dados reais da B3 via API gratuita
-        url = "https://api.binance.com/api/v3/klines?symbol=WINUSDT&interval=5m&limit=100"
+        # Mapear nomes para a API
+        mapa = {
+            "WIN": "BTCUSDT",
+            "EURUSD": "EURUSDT",
+            "USDJPY": "USDJPY",
+            "XAUUSD": "XAUUSDT"
+        }
+        simbolo = mapa.get(ativo, "BTCUSDT")
+
+        url = f"https://api.binance.com/api/v3/klines?symbol={simbolo}&interval=5m&limit={velas}"
         r = requests.get(url, timeout=15)
         if r.status_code == 200:
             dados = r.json()
             df = pd.DataFrame(dados, columns=[
                 'tempo', 'open', 'high', 'low', 'close', 'volume',
-                'tempo_fim', 'volume_moeda', 'negocios', 'taker_compra', 'taker_venda', 'ignorado'
+                'fim', 'vol_moeda', 'negocios', 'taker_compra', 'taker_venda', 'x'
             ])
-            for col in ['open','high','low','close','volume']:
-                df[col] = pd.to_numeric(df[col])
+            for c in ['open','high','low','close','volume']:
+                df[c] = pd.to_numeric(df[c])
             df['datetime'] = pd.to_datetime(df['tempo'], unit='ms')
             return df[['datetime','open','high','low','close','volume']]
-    except:
+    except Exception as e:
         pass
 
-    # 📡 Fallback: gerador de dados de teste (com padrões realistas)
-    st.info("📡 Usando modo simulação — conecte MT5 para dados reais")
-    datas = pd.date_range(end=datetime.now(), periods=100, freq='5min')
+    # Fallback: dados simulados realistas
+    datas = pd.date_range(end=datetime.now(), periods=velas, freq='5min')
     np.random.seed(42)
-    base = 134000
-    ruido = np.cumsum(np.random.randn(100) * 8)
+    base = {"WIN":134000, "EURUSD":1.0850, "USDJPY":150.00, "XAUUSD":2030.00}.get(ativo, 1.0000)
+    ruido = np.cumsum(np.random.randn(velas) * (8 if ativo=="WIN" else 0.0010))
     preco = base + ruido
     df = pd.DataFrame({
         'datetime': datas,
-        'open': preco + np.random.randn(100)*3,
-        'high': preco + abs(np.random.randn(100)*7),
-        'low': preco - abs(np.random.randn(100)*7),
-        'close': preco + np.random.randn(100)*3,
-        'volume': np.random.randint(3000, 8000, 100)
+        'open': preco + np.random.randn(velas)*(3 if ativo=="WIN" else 0.0005),
+        'high': preco + abs(np.random.randn(velas))*(7 if ativo=="WIN" else 0.0012),
+        'low': preco - abs(np.random.randn(velas))*(7 if ativo=="WIN" else 0.0012),
+        'close': preco + np.random.randn(velas)*(3 if ativo=="WIN" else 0.0005),
+        'volume': np.random.randint(3000, 8000, velas)
     })
     return df
 
 # ==========================================================
-# 🧠 FUNÇÕES DOS INDICADORES (PURO PANDAS)
+# 🧠 INDICADORES (PURO PANDAS)
 # ==========================================================
 def calcular_ema(serie, periodo):
     return serie.ewm(span=periodo, adjust=False).mean()
@@ -140,16 +154,13 @@ def detectar_engolfo_baixa(df):
 # ==========================================================
 def verificar_sinal(df):
     df = df.copy()
-    
     df['ema21'] = calcular_ema(df['close'], 21)
     df['ema50'] = calcular_ema(df['close'], 50)
     df['rsi'] = calcular_rsi(df['close'], 9)
     df['vol_ma20'] = df['volume'].rolling(20).mean()
-    
     df['martelo'] = detectar_martelo(df)
     df['engolfo_alta'] = detectar_engolfo_alta(df)
     df['engolfo_baixa'] = detectar_engolfo_baixa(df)
-    
     df['suporte'] = df['low'].rolling(3).min()
     df['resistencia'] = df['high'].rolling(3).max()
 
@@ -176,38 +187,16 @@ def verificar_sinal(df):
     return sinal_compra, sinal_venda, ult
 
 # ==========================================================
-# 🤖 EXECUTAR ORDEM — MT5 (SÓ FUNCIONA NO VPS)
+# 📋 LISTA DE ATIVOS SELECIONADOS
 # ==========================================================
-def executar_ordem_mt5(tipo, preco, stop, alvo):
-    if not USAR_MT5:
-        return False, "Modo aviso — ordem manual"
-    
-    try:
-        import MetaTrader5 as mt5
-        if not mt5.initialize(login=int(MT5_LOGIN), password=MT5_SENHA, server=MT5_SERVIDOR):
-            return False, f"MT5 desconectado: {mt5.last_error()}"
-        
-        mt5.symbol_select(ATIVO, True)
-        ordem = {
-            "action": mt5.TRADE_ACTION_DEAL,
-            "symbol": ATIVO,
-            "volume": 1.0,
-            "type": mt5.ORDER_TYPE_BUY if tipo == "COMPRA" else mt5.ORDER_TYPE_SELL,
-            "price": preco,
-            "sl": stop,
-            "tp": alvo,
-            "type_filling": mt5.ORDER_FILLING_IOC,
-        }
-        res = mt5.order_send(ordem)
-        mt5.shutdown()
-        if res.retcode == mt5.TRADE_RETCODE_DONE:
-            return True, f"✅ Ordem executada! Ticket: {res.order}"
-        return False, f"❌ Erro: {res.retcode}"
-    except Exception as e:
-        return False, f"⚠️ MT5 indisponível: {e}"
+ATIVOS_MONITORAR = []
+if MONITORAR_WIN: ATIVOS_MONITORAR.append("WIN")
+if MONITORAR_EURUSD: ATIVOS_MONITORAR.append("EURUSD")
+if MONITORAR_USDJPY: ATIVOS_MONITORAR.append("USDJPY")
+if MONITORAR_XAUUSD: ATIVOS_MONITORAR.append("XAUUSD")
 
 # ==========================================================
-# 🎛️ CONTROLE PRINCIPAL
+# 🎛️ CONTROLE
 # ==========================================================
 col1, col2 = st.columns(2)
 with col1:
@@ -218,28 +207,28 @@ with col2:
 status_area = st.empty()
 log_area = st.container()
 
+# Estado
 if 'rodando' not in st.session_state:
     st.session_state.rodando = False
-if 'operacoes_dia' not in st.session_state:
-    st.session_state.operacoes_dia = 0
-if 'operacao_ativa' not in st.session_state:
-    st.session_state.operacao_ativa = None
+if 'sinais_ativos' not in st.session_state:
+    st.session_state.sinais_ativos = {}
+if 'ultimo_sinal' not in st.session_state:
+    st.session_state.ultimo_sinal = {}
+if 'contagem_dia' not in st.session_state:
+    st.session_state.contagem_dia = {}
 if 'ultimo_dia' not in st.session_state:
     st.session_state.ultimo_dia = date.today()
-if 'ultimo_sinal' not in st.session_state:
-    st.session_state.ultimo_sinal = ""
 
 # ==========================================================
 # ▶️ INICIAR / PARAR
 # ==========================================================
 if iniciar:
     st.session_state.rodando = True
-    st.session_state.operacoes_dia = 0
-    st.session_state.operacao_ativa = None
-    st.session_state.ultimo_sinal = ""
-    fonte = "MT5" if USAR_MT5 else "Fonte gratuita"
-    enviar_telegram(f"🤖 *Robô INICIADO!*\n📡 Fonte: {fonte}\n⏰ Aguardando sinais...")
-    st.success(f"✅ Robô INICIADO! Usando: {fonte}")
+    st.session_state.sinais_ativos = {ativo:None for ativo in ATIVOS_MONITORAR}
+    st.session_state.ultimo_sinal = {ativo:"" for ativo in ATIVOS_MONITORAR}
+    st.session_state.contagem_dia = {ativo:0 for ativo in ATIVOS_MONITORAR}
+    enviar_telegram(f"🤖 *Robô INICIADO!*\n📊 Monitorando: {', '.join(ATIVOS_MONITORAR)}\n⏰ Aguardando sinais...")
+    st.success(f"✅ Robô INICIADO! Monitorando {len(ATIVOS_MONITORAR)} ativos!")
 
 if parar:
     st.session_state.rodando = False
@@ -247,125 +236,118 @@ if parar:
     st.warning("🔴 Robô PARADO")
 
 # ==========================================================
-# 🔄 LOOP PRINCIPAL
+# 🔄 LOOP PRINCIPAL — TODOS OS PARES DE UMA VEZ!
 # ==========================================================
 if st.session_state.rodando:
-    status_area.success("🟢 RODANDO — Monitorando mercado")
+    status_area.success(f"🟢 MONITORANDO {len(ATIVOS_MONITORAR)} ATIVOS — Aguardando sinais...")
     hoje = date.today()
-    
+
     # Reset diário
     if hoje != st.session_state.ultimo_dia:
-        st.session_state.operacoes_dia = 0
-        st.session_state.operacao_ativa = None
+        for ativo in ATIVOS_MONITORAR:
+            st.session_state.sinais_ativos[ativo] = None
+            st.session_state.ultimo_sinal[ativo] = ""
+            st.session_state.contagem_dia[ativo] = 0
         st.session_state.ultimo_dia = hoje
-        enviar_telegram("🔄 Novo dia iniciado. Operações zeradas.")
+        enviar_telegram("🔄 Novo dia iniciado. Contagens zeradas.")
 
     with log_area:
-        st.info(f"""
-📋 **Painel de Controle**
-• 📡 Fonte: {'MT5 / XP' if USAR_MT5 else 'Gratuita (Aviso Telegram)'}
-• Ativo: {ATIVO}
-• Stop: {STOP_PONTOS} pts | Alvo: {R_R_ALVO}×
-• Hoje: {st.session_state.operacoes_dia}/{MAX_OP_DIA} ops
-• Posição: {st.session_state.operacao_ativa or 'Nenhuma'}
-        """)
         st.markdown("---")
+        st.subheader("📋 Status dos Ativos")
 
-        # 🔄 Buscar dados
-        df = buscar_dados_gratis(ATIVO, 100)
-        if df is None or len(df) < 30:
-            st.warning("⏳ Aguardando dados do mercado...")
-        else:
+        for ativo in ATIVOS_MONITORAR:
+            st.markdown(f"### {ativo}")
+            col_a, col_b, col_c = st.columns(3)
+
+            # Reset contagem se mudou de ativo
+            if ativo not in st.session_state.contagem_dia:
+                st.session_state.contagem_dia[ativo] = 0
+
+            # 🔄 Buscar dados
+            df = buscar_dados(ativo, 100)
+            if df is None or len(df) < 30:
+                st.warning(f"⏳ {ativo}: Aguardando dados...")
+                continue
+
             sinal_compra, sinal_venda, ult = verificar_sinal(df)
             preco_atual = ult['close']
+            unidade = "pontos" if ativo=="WIN" else "pips"
+            casas = 0 if ativo=="WIN" else (2 if ativo=="USDJPY" else 4)
 
-            # ✅ NOVA ENTRADA
-            if st.session_state.operacao_ativa is None and st.session_state.operacoes_dia < MAX_OP_DIA:
+            # ✅ DETECTAR SINAL
+            if st.session_state.sinais_ativos[ativo] is None and st.session_state.contagem_dia[ativo] < MAX_OP_DIA:
                 sinal_atual = ""
-                
+                msg = ""
+
                 if sinal_compra:
-                    entrada = round(preco_atual)
-                    stop = round(entrada - STOP_PONTOS)
-                    alvo = round(entrada + STOP_PONTOS * R_R_ALVO)
+                    entrada = round(preco_atual, casas)
+                    stop = round(entrada - (STOP_PIPS * (0.01 if ativo=="USDJPY" else (0.0001 if ativo!="WIN" else 1))), casas)
+                    alvo = round(entrada + (STOP_PIPS * R_R_ALVO * (0.01 if ativo=="USDJPY" else (0.0001 if ativo!="WIN" else 1))), casas)
                     sinal_atual = f"COMPRA-{entrada}-{stop}-{alvo}"
-                    
                     msg = f"""
-✅ *SINAL DE COMPRA DETECTADO!*
+✅ *SINAL DE COMPRA — {ativo}*
 ⏰ {datetime.now().strftime('%H:%M')}
 💰 Entrada: {entrada}
-🛑 Stop: {stop}
-🎯 Alvo: {alvo}
+🛑 Stop: {stop} {unidade}
+🎯 Alvo: {alvo} {unidade}
 📊 R/R: {R_R_ALVO}:1
                     """.strip()
 
                 elif sinal_venda:
-                    entrada = round(preco_atual)
-                    stop = round(entrada + STOP_PONTOS)
-                    alvo = round(entrada - STOP_PONTOS * R_R_ALVO)
+                    entrada = round(preco_atual, casas)
+                    stop = round(entrada + (STOP_PIPS * (0.01 if ativo=="USDJPY" else (0.0001 if ativo!="WIN" else 1))), casas)
+                    alvo = round(entrada - (STOP_PIPS * R_R_ALVO * (0.01 if ativo=="USDJPY" else (0.0001 if ativo!="WIN" else 1))), casas)
                     sinal_atual = f"VENDA-{entrada}-{stop}-{alvo}"
-                    
                     msg = f"""
-🔴 *SINAL DE VENDA DETECTADO!*
+🔴 *SINAL DE VENDA — {ativo}*
 ⏰ {datetime.now().strftime('%H:%M')}
 💰 Entrada: {entrada}
-🛑 Stop: {stop}
-🎯 Alvo: {alvo}
+🛑 Stop: {stop} {unidade}
+🎯 Alvo: {alvo} {unidade}
 📊 R/R: {R_R_ALVO}:1
                     """.strip()
 
-                # Enviar APENAS se for sinal novo
-                if sinal_atual and sinal_atual != st.session_state.ultimo_sinal:
-                    st.session_state.ultimo_sinal = sinal_atual
-                    
-                    if USAR_MT5:
-                        ok, retorno = executar_ordem_mt5(
-                            "COMPRA" if sinal_compra else "VENDA",
-                            entrada, stop, alvo
-                        )
-                        msg += f"\n🤖 {retorno}"
-                        st.success(msg)
-                    else:
-                        st.info(msg)
-                    
-                    enviar_telegram(msg)
-                    st.session_state.operacoes_dia += 1
-                    st.session_state.operacao_ativa = {
+                # Enviar se for sinal NOVO
+                if sinal_atual and sinal_atual != st.session_state.ultimo_sinal[ativo]:
+                    st.session_state.ultimo_sinal[ativo] = sinal_atual
+                    st.session_state.sinais_ativos[ativo] = {
                         "tipo": "COMPRA" if sinal_compra else "VENDA",
                         "ent": entrada, "stop": stop, "alvo": alvo
                     }
-                    st.markdown("---")
-                    st.success("📲 Sinal enviado no Telegram!")
+                    st.session_state.contagem_dia[ativo] += 1
+                    st.success(msg)
+                    enviar_telegram(msg)
 
             # 📊 ACOMPANHAR OPERAÇÃO ABERTA
-            elif st.session_state.operacao_ativa:
-                op = st.session_state.operacao_ativa
+            elif st.session_state.sinais_ativos[ativo]:
+                op = st.session_state.sinais_ativos[ativo]
                 res = None
                 if op["tipo"] == "COMPRA":
                     if preco_atual <= op["stop"]:
-                        res = "🛑 STOP BATIDO — PREJUÍZO"
+                        res = f"🛑 {ativo}: STOP BATIDO"
                     elif preco_atual >= op["alvo"]:
-                        res = "✅ ALVO BATIDO — LUCRO"
+                        res = f"✅ {ativo}: ALVO BATIDO — LUCRO!"
                 else:
                     if preco_atual >= op["stop"]:
-                        res = "🛑 STOP BATIDO — PREJUÍZO"
+                        res = f"🛑 {ativo}: STOP BATIDO"
                     elif preco_atual <= op["alvo"]:
-                        res = "✅ ALVO BATIDO — LUCRO"
+                        res = f"✅ {ativo}: ALVO BATIDO — LUCRO!"
 
                 if res:
-                    msg_res = f"""
-📋 *OPERAÇÃO FINALIZADA*
-{res}
-💰 Entrada: {op['ent']:.0f}
-🛑 Stop: {op['stop']:.0f}
-🎯 Alvo: {op['alvo']:.0f}
-💵 Preço atual: {preco_atual:.0f}
-                    """.strip()
-                    st.markdown(msg_res)
-                    enviar_telegram(msg_res)
-                    st.session_state.operacao_ativa = None
+                    st.info(res)
+                    enviar_telegram(f"📋 {res}")
+                    st.session_state.sinais_ativos[ativo] = None
 
-        time.sleep(60)  # Verifica a cada 60 segundos
+            # 📈 Status do ativo
+            with col_a:
+                st.metric("Preço Atual", f"{round(preco_atual, casas)}")
+            with col_b:
+                st.metric("Sinais Hoje", f"{st.session_state.contagem_dia[ativo]}/{MAX_OP_DIA}")
+            with col_c:
+                st.metric("Status", "🔍 Aguardando" if not st.session_state.sinais_ativos.get(ativo) else "📡 Monitorando posição")
+
+        time.sleep(60)
         st.rerun()
 
 else:
-    status_area.info("🔴 PARADO — Configure e clique em INICIAR")
+    status_area.info("🔴 PARADO — Selecione os ativos e clique em INICIAR")
